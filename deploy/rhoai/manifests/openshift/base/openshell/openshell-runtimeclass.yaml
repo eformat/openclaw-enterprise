@@ -3,6 +3,6 @@ kind: RuntimeClass
 metadata:
   name: openshell-sandbox
 handler: crun
-scheduling:
-  nodeSelector:
-    oce-role: agent
+# SNO profile: a single node makes scheduling constraints pointless; restore
+# the oce-role selector on multi-worker clusters.
+
