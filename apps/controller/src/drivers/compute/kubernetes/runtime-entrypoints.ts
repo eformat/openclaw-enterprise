@@ -759,13 +759,17 @@ function writeCodexConfigToml(runtime) {
   pluginMkdirSync(pluginDirname(target), { recursive: true });
   // Configuration-declared model metadata ships as a Codex model catalog beside
   // config.toml; without it the runtime falls back to OpenAI-shaped metadata
-  // whose grammar-format tools OpenAI-compatible providers reject.
+  // whose grammar-format tools OpenAI-compatible providers reject. The key is a
+  // top-level TOML entry, so it must precede every table header in the
+  // generated file — appending it would land inside the last table and be
+  // ignored.
   let configuration = runtime.codexConfigurationToml;
   const modelCatalog = runtime.manifest?.modelCatalog;
   if (typeof modelCatalog === "string" && modelCatalog.length > 0) {
     const catalogTarget = safeRuntimePath(process.env.CODEX_HOME, "models.json");
     pluginWriteFileSync(catalogTarget, modelCatalog, { mode: 0o600 });
-    configuration += "\nmodel_catalog_json = " + JSON.stringify(catalogTarget) + "\n";
+    configuration =
+      "model_catalog_json = " + JSON.stringify(catalogTarget) + "\n\n" + configuration;
   }
   pluginWriteFileSync(target, configuration, { mode: 0o600 });
 }

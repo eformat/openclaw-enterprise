@@ -89,6 +89,25 @@ export function codexGatewayModelConfiguration(
  * providers such as MaaS reject. */
 const MODEL_INFO_LIMITS = { maxKeys: 32, maxBytes: 8_192, maxDepth: 4 } as const;
 
+/** Fields the Codex model-catalog schema requires; entries parse only with
+ * them present, discovered against the pinned runtime's deserializer. The
+ * base instructions text is Codex's own default prompt opening. */
+const MODEL_CATALOG_REQUIRED_DEFAULTS: Readonly<Record<string, unknown>> = {
+  supported_reasoning_levels: [
+    { effort: "low", description: "Fast responses with lighter reasoning" },
+    { effort: "medium", description: "Balances speed and reasoning depth for everyday tasks" },
+    { effort: "high", description: "Greater reasoning depth for complex problems" },
+  ],
+  visibility: "list",
+  minimal_client_version: "0.153.0",
+  supported_in_api: true,
+  priority: 100,
+  truncation_policy: { mode: "tokens", limit: 10_000 },
+  experimental_supported_tools: [],
+  base_instructions:
+    "You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
+};
+
 function validateModelInfo(
   modelInfo: unknown,
   modelId: string,
@@ -127,6 +146,16 @@ function validateModelInfo(
       );
     }
   }
+  if (
+    row.apply_patch_tool_type !== undefined &&
+    row.apply_patch_tool_type !== "freeform"
+  ) {
+    // The pinned runtime's catalog deserializer accepts only the freeform
+    // variant; function-shaped apply_patch tooling does not exist there.
+    throw new Error(
+      `models.providers.codex model ${modelId} modelInfo apply_patch_tool_type must be "freeform" when set.`,
+    );
+  }
   return row;
 }
 
@@ -147,7 +176,11 @@ export function codexModelCatalog(
     if (typeof id !== "string" || id.trim().length === 0) continue;
     const info = validateModelInfo(entry?.modelInfo, id);
     if (Object.keys(info).length === 0) continue;
-    entries.push({ slug: id.trim(), ...info });
+    entries.push({
+      slug: id.trim(),
+      ...MODEL_CATALOG_REQUIRED_DEFAULTS,
+      ...info,
+    });
   }
   if (entries.length === 0) return undefined;
   const serialized = JSON.stringify({ models: entries });
