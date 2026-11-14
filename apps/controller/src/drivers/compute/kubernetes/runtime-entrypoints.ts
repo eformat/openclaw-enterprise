@@ -748,6 +748,10 @@ function safeRuntimePath(root, relative) {
   return resolved;
 }
 
+// Set by writeCodexConfigToml when the runtime manifest declares model metadata;
+// consumed by the app-server spawn below.
+let codexModelCatalogArgument = [];
+
 function writeCodexConfigToml(runtime) {
   if (runtime.manifest?.kind !== "codex") {
     throw new Error("Codex plugin runtime artifact kind mismatch.");
@@ -762,7 +766,9 @@ function writeCodexConfigToml(runtime) {
   // whose grammar-format tools OpenAI-compatible providers reject. The key is a
   // top-level TOML entry, so it must precede every table header in the
   // generated file — appending it would land inside the last table and be
-  // ignored.
+  // ignored. The app-server process additionally receives the key as a -c
+  // argument: its long-lived models manager does not pick the setting up from
+  // config.toml alone.
   let configuration = runtime.codexConfigurationToml;
   const modelCatalog = runtime.manifest?.modelCatalog;
   if (typeof modelCatalog === "string" && modelCatalog.length > 0) {
@@ -770,6 +776,10 @@ function writeCodexConfigToml(runtime) {
     pluginWriteFileSync(catalogTarget, modelCatalog, { mode: 0o600 });
     configuration =
       "model_catalog_json = " + JSON.stringify(catalogTarget) + "\n\n" + configuration;
+    codexModelCatalogArgument = [
+      "-c",
+      "model_catalog_json=" + JSON.stringify(catalogTarget),
+    ];
   }
   pluginWriteFileSync(target, configuration, { mode: 0o600 });
 }
@@ -4717,7 +4727,7 @@ ${disableUnboundedConnectionRetries ? '    "--disable", "unbounded_connection_re
   logStartupPhase("native-spawn", startupPhaseOrigin);
   const child = spawn(
     "codex",
-    [...nativeArguments, "--listen", "ws://0.0.0.0:" + process.env.APP_SERVER_PORT,
+    [...nativeArguments, ...codexModelCatalogArgument, "--listen", "ws://0.0.0.0:" + process.env.APP_SERVER_PORT,
       "--ws-auth", "capability-token", "--ws-token-sha256", digest],
     { stdio: ["inherit", "inherit", "pipe"], cwd: workspaceDirectory, env: codexChildEnvironment() },
   );
