@@ -56,6 +56,17 @@ data:
                               request_headers_to_add:
                                 - header: { key: x-occ-identity, value: occ-workspace-files }
                                   append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                # The Gateway refuses trusted-proxy requests
+                                # without a scope header, and requires a
+                                # concrete X-Forwarded-For even from a trusted
+                                # peer (allowRealIpFallback does not cover the
+                                # Control UI). Rebuild both here: the scopes
+                                # within the identity's ceiling, and the router
+                                # Service IP as the attribution entry point.
+                                - header: { key: x-openclaw-scopes, value: operator.admin }
+                                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                - header: { key: x-forwarded-for, value: ${ROUTER_IP} }
+                                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
                     http_filters:
                       - name: envoy.filters.http.router
                         typed_config:
@@ -92,7 +103,11 @@ spec:
     spec:
       serviceAccountName: oce-agent-control-ui-oauth
       hostAliases:
-        - ip: ${ROUTER_IP}
+        # The OAuth exchange must bypass the cluster router: AWS ELB
+        # ingresscontrollers enable PROXY protocol on the router frontend, so
+        # in-cluster TLS connections to it are reset mid-handshake. The
+        # oauth-openshift Service terminates TLS at the oauth Pod itself.
+        - ip: ${OAUTH_SERVICE_IP}
           hostnames:
             - ${OAUTH_HOST}
       securityContext:
@@ -247,17 +262,23 @@ spec:
         - protocol: TCP
           port: 8080
     - to:
+        # The token exchange targets the oauth-openshift Service. OVN evaluates
+        # egress policy after service DNAT, so the rule must admit the
+        # endpoint's targetPort (6443) beside the Service port, and match the
+        # endpoint Pod, not the router.
+        - ipBlock:
+            cidr: ${OAUTH_SERVICE_IP}/32
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: openshift-ingress
+              kubernetes.io/metadata.name: openshift-authentication
           podSelector:
             matchLabels:
-              ingresscontroller.operator.openshift.io/deployment-ingresscontroller: default
-        - ipBlock:
-            cidr: ${ROUTER_CIDR}
+              app: oauth-openshift
       ports:
         - protocol: TCP
           port: 443
+        - protocol: TCP
+          port: 6443
     - to:
         - ipBlock:
             cidr: ${API_SERVICE_CIDR}

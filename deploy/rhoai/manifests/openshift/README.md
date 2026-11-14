@@ -188,6 +188,15 @@ protects a public Route to one Agent Gateway. After OpenShift OAuth checks `get`
 on the exact Gateway Service, a loopback Envoy proxy strips browser credentials
 and supplies the Gateway's trusted identity.
 
+Three transport facts shape this procedure. The token exchange targets the
+`oauth-openshift` Service, not the router: AWS ELB ingresscontrollers enable
+PROXY protocol on the router frontend, which resets in-cluster TLS connections
+to it. OVN evaluates egress policy after service DNAT, so the proxy's
+NetworkPolicy admits the oauth endpoint's `6443` targetPort, not only the
+Service port. And the Gateway refuses trusted-proxy requests that lack a
+`x-openclaw-scopes` header or a concrete `X-Forwarded-For`; the Envoy identity
+proxy rebuilds both.
+
 Use the Agent identifiers from the Agent procedure and discover the images,
 hostname, and Service check:
 
@@ -203,11 +212,13 @@ export CONTROL_UI_HOST="oc-ui-${AGENT_SA#agent-}.$(oc get \
   ingresses.config.openshift.io cluster -o jsonpath='{.spec.domain}')"
 export OAUTH_HOST="$(oc -n openshift-authentication get route oauth-openshift \
   -o jsonpath='{.spec.host}')"
+export OAUTH_SERVICE_IP="$(oc -n openshift-authentication get svc oauth-openshift \
+  -o jsonpath='{.spec.clusterIP}')"
 export OAUTH_SAR="$(jq -nc --arg namespace "$GATEWAY_NAMESPACE" \
   --arg service "$GATEWAY_SERVICE" \
   '{namespace:$namespace,resource:"services",resourceName:$service,verb:"get"}')"
 test -n "$OAUTH_PROXY_IMAGE" && test -n "$CONTROL_UI_ENVOY_IMAGE" &&
-  test -n "$CONTROL_UI_HOST" && test -n "$OAUTH_HOST"
+  test -n "$CONTROL_UI_HOST" && test -n "$OAUTH_HOST" && test -n "$OAUTH_SERVICE_IP"
 oc auth can-i get "service/$GATEWAY_SERVICE" -n "$GATEWAY_NAMESPACE"
 ```
 
@@ -226,7 +237,6 @@ export DNS_CIDR_0="$(oc -n openshift-dns get svc dns-default \
   -o jsonpath='{.spec.clusterIP}')/32"
 export ROUTER_IP="$(oc -n openshift-ingress get svc router-default \
   -o jsonpath='{.spec.clusterIP}')"
-export ROUTER_CIDR="$ROUTER_IP/32"
 test -n "$ROUTER_IP"
 export API_SERVICE_CIDR="$(oc -n default get svc kubernetes \
   -o jsonpath='{.spec.clusterIP}')/32"
@@ -239,7 +249,7 @@ oc -n openshift-dns get pods \
     else error("expected IPv4 DNS Pod addresses") end' \
   > "$OCC_INPUT_DIRECTORY/dns-peers.json"
 export DNS_PEERS_FILE="$OCC_INPUT_DIRECTORY/dns-peers.json"
-envsubst '${GATEWAY_NAMESPACE} ${GATEWAY_SERVICE} ${OAUTH_PROXY_IMAGE} ${CONTROL_UI_ENVOY_IMAGE} ${OAUTH_SAR} ${CONTROL_UI_HOST} ${OAUTH_HOST} ${DNS_CIDR_0} ${ROUTER_IP} ${ROUTER_CIDR} ${API_SERVICE_CIDR}' \
+envsubst '${GATEWAY_NAMESPACE} ${GATEWAY_SERVICE} ${OAUTH_PROXY_IMAGE} ${CONTROL_UI_ENVOY_IMAGE} ${OAUTH_SAR} ${CONTROL_UI_HOST} ${OAUTH_HOST} ${OAUTH_SERVICE_IP} ${DNS_CIDR_0} ${ROUTER_IP} ${API_SERVICE_CIDR}' \
   < deploy/rhoai/manifests/openshift/base/control-ui/control-ui-oauth-proxy.yaml \
   > "$OCC_INPUT_DIRECTORY/control-ui-oauth-proxy.yaml"
 yq -i '(select(.kind == "NetworkPolicy").spec.egress[] |
