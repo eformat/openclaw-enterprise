@@ -9,6 +9,7 @@ import {
   validPluginApprovers,
 } from "@openclaw-enterprise/contracts";
 import { codexApprovalPolicy } from "@openclaw-enterprise/occ";
+import { codexModelCatalog } from "./codex-model-configuration.ts";
 import {
   type CodexPublicGithubRead,
   PUBLIC_GITHUB_READ_SKILL,
@@ -72,6 +73,8 @@ export type PluginRuntimeSpec =
       readonly repositoryBrokerNetworkPolicy?: CodexRepositoryBrokerNetworkPolicy;
       readonly publicGithubRead?: CodexPublicGithubRead;
       readonly modelEndpoint?: CodexModelEndpoint;
+      /** Codex model-catalog JSON for Configuration-declared model metadata. */
+      readonly modelCatalog?: string;
       readonly providerTools?: "none";
       readonly egressEnrollment?: HarnessEgressEnrollment;
     };
@@ -107,6 +110,7 @@ function pluginFreeRuntimeForRevision(
     throw new Error("AgentRevision plugin approvers are invalid.");
   }
   if (revision.harness.id === "codex" && revision.harness.mode === "dedicated") {
+    const modelCatalog = codexModelCatalog(revision.configuration);
     return {
       kind: "codex",
       selections: {},
@@ -123,6 +127,7 @@ function pluginFreeRuntimeForRevision(
       ...(openaiBaseUrl === undefined
         ? {}
         : { modelEndpoint: { baseUrl: openaiBaseUrl, modelProvider: "openai-compatible" } }),
+      ...(modelCatalog === undefined ? {} : { modelCatalog }),
       ...(repositoryBrokerNetworkPolicy === undefined ? {} : { repositoryBrokerNetworkPolicy }),
       ...(publicGithubRead === undefined ? {} : { publicGithubRead }),
     };
@@ -168,6 +173,10 @@ export function pluginRuntimeSpecForRevision(
   ) {
     throw new Error("Repository credential broker network policy requires the Codex PluginDriver.");
   }
+  const modelCatalog =
+    state.driver.implementation === "occ/codex-plugin"
+      ? codexModelCatalog(revision.configuration)
+      : undefined;
   const runtime: PluginRuntimeSpec =
     state.driver.implementation === "occ/codex-plugin"
       ? {
@@ -184,6 +193,7 @@ export function pluginRuntimeSpecForRevision(
           ...(openaiBaseUrl === undefined
             ? {}
             : { modelEndpoint: { baseUrl: openaiBaseUrl, modelProvider: "openai-compatible" } }),
+          ...(modelCatalog === undefined ? {} : { modelCatalog }),
           ...(repositoryBrokerNetworkPolicy === undefined ? {} : { repositoryBrokerNetworkPolicy }),
           ...(publicGithubRead === undefined ? {} : { publicGithubRead }),
         }
@@ -334,6 +344,9 @@ function runtimeManifest(runtime: PluginRuntimeSpec): Readonly<Record<string, un
       : {}),
     ...(runtime.kind === "codex" && runtime.modelEndpoint !== undefined
       ? { modelEndpoint: runtime.modelEndpoint }
+      : {}),
+    ...(runtime.kind === "codex" && runtime.modelCatalog !== undefined
+      ? { modelCatalog: runtime.modelCatalog }
       : {}),
     ...(runtime.pluginApprovers === undefined ? {} : { pluginApprovers: runtime.pluginApprovers }),
     ...(runtime.kind === "codex" && runtime.repositoryBrokerNetworkPolicy !== undefined

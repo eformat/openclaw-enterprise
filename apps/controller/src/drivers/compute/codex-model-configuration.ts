@@ -68,8 +68,9 @@ export function codexGatewayModelConfiguration(
     if (row === undefined && !selections.has(reference)) {
       continue;
     }
+    const { modelInfo, ...nativeRow } = row ?? { name: id };
     projected.set(id, {
-      ...(row ?? { name: id }),
+      ...nativeRow,
       id: `${endpoint.modelProvider}/${id}`,
     });
   }
@@ -79,4 +80,81 @@ export function codexGatewayModelConfiguration(
   providers.codex = { ...source, models: [...projected.values()] };
   models.providers = providers;
   return { ...document, models: models as OpenClawConfigurationDocument };
+}
+
+/** Model metadata a Configuration declares for Codex's native model catalog, keyed
+ * exactly as the Codex runtime's bundled entries (`apply_patch_tool_type`,
+ * `shell_type`, `context_window`, ...). Without it the runtime falls back to
+ * metadata that assumes OpenAI-specific tool formats, which OpenAI-compatible
+ * providers such as MaaS reject. */
+const MODEL_INFO_LIMITS = { maxKeys: 32, maxBytes: 8_192, maxDepth: 4 } as const;
+
+function validateModelInfo(
+  modelInfo: unknown,
+  modelId: string,
+): Record<string, unknown> {
+  if (modelInfo === undefined) return {};
+  const row = asRecord(modelInfo);
+  if (row === undefined) {
+    throw new Error(`models.providers.codex model ${modelId} modelInfo must be an object.`);
+  }
+  const keys = Object.keys(row);
+  if (keys.length === 0) {
+    throw new Error(`models.providers.codex model ${modelId} declares an empty modelInfo.`);
+  }
+  if (keys.length > MODEL_INFO_LIMITS.maxKeys) {
+    throw new Error(
+      `models.providers.codex model ${modelId} modelInfo exceeds ${MODEL_INFO_LIMITS.maxKeys} keys.`,
+    );
+  }
+  const depth = (value: unknown, level: number): number =>
+    Array.isArray(value)
+      ? Math.max(0, ...value.map((item) => depth(item, level + 1)))
+      : typeof value === "object" && value !== null
+        ? Math.max(level, ...Object.values(value).map((item) => depth(item, level + 1)))
+        : level;
+  if (depth(row, 0) > MODEL_INFO_LIMITS.maxDepth) {
+    throw new Error(
+      `models.providers.codex model ${modelId} modelInfo exceeds ${MODEL_INFO_LIMITS.maxDepth} nesting levels.`,
+    );
+  }
+  for (const value of Object.values(row)) {
+    const leaf = typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null;
+    const branch = Array.isArray(value) || (typeof value === "object" && value !== null);
+    if (!leaf && !branch) {
+      throw new Error(
+        `models.providers.codex model ${modelId} modelInfo values must be JSON data.`,
+      );
+    }
+  }
+  return row;
+}
+
+/** The Codex model-catalog JSON for every Configuration-declared Codex model that
+ * carries `modelInfo`, or undefined when none does. Delivered to the Harness
+ * runtime and referenced from the generated `config.toml` through
+ * `model_catalog_json`, so custom providers get native tool formats instead of
+ * Codex's OpenAI-shaped fallback metadata. */
+export function codexModelCatalog(
+  configuration: OpenClawConfigurationDocument,
+): string | undefined {
+  const providers = asRecord(asRecord(configuration.models)?.providers);
+  const source = asRecord(providers?.codex);
+  const catalog = Array.isArray(source?.models) ? source.models.map(asRecord) : [];
+  const entries: Record<string, unknown>[] = [];
+  for (const entry of catalog) {
+    const id = entry?.id;
+    if (typeof id !== "string" || id.trim().length === 0) continue;
+    const info = validateModelInfo(entry?.modelInfo, id);
+    if (Object.keys(info).length === 0) continue;
+    entries.push({ slug: id.trim(), ...info });
+  }
+  if (entries.length === 0) return undefined;
+  const serialized = JSON.stringify({ models: entries });
+  if (Buffer.byteLength(serialized, "utf8") > MODEL_INFO_LIMITS.maxBytes) {
+    throw new Error(
+      `The Codex model catalog exceeds ${MODEL_INFO_LIMITS.maxBytes} bytes.`,
+    );
+  }
+  return serialized;
 }

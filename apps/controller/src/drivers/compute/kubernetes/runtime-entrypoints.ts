@@ -757,7 +757,17 @@ function writeCodexConfigToml(runtime) {
   }
   const target = safeRuntimePath(process.env.CODEX_HOME, "config.toml");
   pluginMkdirSync(pluginDirname(target), { recursive: true });
-  pluginWriteFileSync(target, runtime.codexConfigurationToml, { mode: 0o600 });
+  // Configuration-declared model metadata ships as a Codex model catalog beside
+  // config.toml; without it the runtime falls back to OpenAI-shaped metadata
+  // whose grammar-format tools OpenAI-compatible providers reject.
+  let configuration = runtime.codexConfigurationToml;
+  const modelCatalog = runtime.manifest?.modelCatalog;
+  if (typeof modelCatalog === "string" && modelCatalog.length > 0) {
+    const catalogTarget = safeRuntimePath(process.env.CODEX_HOME, "models.json");
+    pluginWriteFileSync(catalogTarget, modelCatalog, { mode: 0o600 });
+    configuration += "\nmodel_catalog_json = " + JSON.stringify(catalogTarget) + "\n";
+  }
+  pluginWriteFileSync(target, configuration, { mode: 0o600 });
 }
 
 function pluginRuntimeReady() {
