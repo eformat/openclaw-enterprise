@@ -64,15 +64,26 @@ drivers:
         process:
           runAsUser: "1000"
           runAsGroup: "1000"
+        # networkPolicies requires minItems: 1. The generated `source-control`
+        # rule (github.com:443, tls: skip) is REFUSED by the OpenShell policy
+        # engine once a credential source targets github.com ("rejecting
+        # uninspected credentialed endpoint" -> CreateSandbox gRPC 9). The
+        # quickstart (docs/snippets/openshell-quickstart/configure-installation.mjs)
+        # removes it; credentialed github egress rides the Credential Gateway
+        # instead (bearer-token sources + toolBinaries), and native Git rides
+        # repository bindings. Keep only the inspected artifact rule:
         networkPolicies:
-          - name: source-control
-            endpoints:
-              - host: github.com
-                ports: [443]
-                protocol: tcp
-                tls: skip
+          - name: codex-plugin-artifacts
             binaries:
-              - path: /usr/bin/git
+              - path: /app/node_modules/openclaw/node_modules/.pnpm/@openai+codex@0.164.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex
+              - path: /app/node_modules/openclaw/node_modules/.pnpm/@openai+codex@0.164.0-linux-arm64/node_modules/@openai/codex/vendor/aarch64-unknown-linux-musl/bin/codex
+            endpoints:
+              - {host: sdmntprsouthcentralus.oaiusercontent.com, ports: [443], protocol: rest, enforcement: enforce, access: read_only}
+              - {host: sdmntprwestcentralus.oaiusercontent.com, ports: [443], protocol: rest, enforcement: enforce, access: read_only}
+              - {host: sdmntprcentralus.oaiusercontent.com, ports: [443], protocol: rest, enforcement: enforce, access: read_only}
+              - {host: sdmntprwestus.oaiusercontent.com, ports: [443], protocol: rest, enforcement: enforce, access: read_only}
+              - {host: sdmntprbrazilsouth.oaiusercontent.com, ports: [443], protocol: rest, enforcement: enforce, access: read_only}
+              - {host: sdmntprwestus2.oaiusercontent.com, ports: [443], protocol: rest, enforcement: enforce, access: read_only}
       sandboxNamePrefix: os
   credential_gateway:
     id: openshell-credentials
